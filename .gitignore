@@ -1,0 +1,10 @@
+.env
+data/raw/
+__pycache__/
+*.pyc
+.venv/
+
+# Project learning files — local only
+design-doc.md
+key-decisions.md
+SKILL.md
