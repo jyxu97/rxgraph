@@ -104,7 +104,7 @@ SEED_DRUGS = [
     # Diabetes medications
     "metformin",
     "glipizide",
-    "glibenclamide",
+    "glyburide",
     "insulin",
     "sitagliptin",
 
