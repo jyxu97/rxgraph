@@ -36,6 +36,7 @@ class InteractionReport(TypedDict):
 class AgentState(TypedDict):
     # --- Input ---
     user_query: str
+    uploaded_image_s3_key: Optional[str]  # set by /api/upload-image, None for text queries
 
     # Session context: in-memory only, never written to Neo4j.
     # Passed as Cypher parameters ($drug_names, $conditions) at query time.
