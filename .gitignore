@@ -3,6 +3,9 @@ data/raw/
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
+frontend/node_modules/
+frontend/build/
 
 # Project learning files — local only
 design-doc.md
