@@ -28,10 +28,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import requests
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
 from openai import OpenAI
 
 from seed_drugs import SEED_DRUGS
+
+# Load .env from project root (parent of ingest/)
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 # ---------------------------------------------------------------------------
 # Configuration — read from environment variables
@@ -91,6 +95,57 @@ def save_raw(drug_name: str, record: dict) -> None:
     safe_name = drug_name.replace(" ", "_").replace(".", "")
     path = RAW_DATA_DIR / f"{safe_name}.json"
     path.write_text(json.dumps(record, indent=2))
+
+
+def source_id_exists(driver, source_id: str) -> bool:
+    """
+    Return True if any INTERACTS_WITH relationship with this source_id already
+    exists in Neo4j.
+
+    Why check before calling GPT?
+    FDA label set_ids are stable identifiers — the same set_id means the same
+    label document. If we've already extracted interactions from this document,
+    calling GPT-4o-mini again would produce identical output and waste tokens.
+    Skipping is safe because MERGE would overwrite with the same data anyway.
+    """
+    with driver.session() as session:
+        result = session.run(
+            "MATCH ()-[r:INTERACTS_WITH {source_id: $source_id}]->() "
+            "RETURN count(r) AS n LIMIT 1",
+            source_id=source_id,
+        )
+        return result.single()["n"] > 0
+
+
+def fetch_labels_since(since_date: str, limit: int = 100) -> list[dict]:
+    """
+    Query OpenFDA for drug label records with effective_time after since_date.
+    Returns a list of raw result dicts.
+
+    Why effective_time?
+    OpenFDA's effective_time is the date the label version became effective — it
+    advances whenever the manufacturer submits a revised label. Filtering on this
+    field catches genuinely new or revised labels since the last Lambda run.
+
+    Date format: OpenFDA range queries use YYYYMMDD (no dashes).
+    """
+    yyyymmdd = since_date.replace("-", "")
+    params = {
+        "search": f"effective_time:[{yyyymmdd}+TO+20991231]",
+        "limit": limit,
+    }
+    try:
+        resp = requests.get(OPENFDA_BASE, params=params, timeout=10)
+        resp.raise_for_status()
+        return resp.json().get("results", [])
+    except requests.HTTPError as e:
+        if e.response.status_code == 404:
+            return []
+        print(f"  [HTTP error] fetch_labels_since: {e}")
+        return []
+    except Exception as e:
+        print(f"  [fetch error] fetch_labels_since: {e}")
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +315,7 @@ def ingest(dry_run: bool = False) -> None:
 
     total_drugs = 0
     total_interactions = 0
+    total_skipped = 0
     not_found = []
 
     for drug_name in SEED_DRUGS:
@@ -269,6 +325,16 @@ def ingest(dry_run: bool = False) -> None:
         if record is None:
             print(f"  [not found] {drug_name}")
             not_found.append(drug_name)
+            time.sleep(OPENFDA_DELAY_SECONDS)
+            continue
+
+        # Source ID: OpenFDA's set_id uniquely identifies the label document.
+        source_id = record.get("set_id", f"openfda_{drug_name}")
+
+        # Skip GPT call if this label version is already in Neo4j.
+        if driver and source_id_exists(driver, source_id):
+            print(f"  [skipped] {drug_name} — source_id already ingested")
+            total_skipped += 1
             time.sleep(OPENFDA_DELAY_SECONDS)
             continue
 
@@ -289,9 +355,6 @@ def ingest(dry_run: bool = False) -> None:
 
         interactions_text = " ".join(interactions_text_list)
         parsed = parse_interactions(openai_client, drug_name, interactions_text)
-
-        # Source ID: OpenFDA's set_id uniquely identifies the label document.
-        source_id = record.get("set_id", f"openfda_{drug_name}")
 
         if driver:
             with driver.session() as session:
@@ -320,9 +383,102 @@ def ingest(dry_run: bool = False) -> None:
     print("\n--- Ingestion complete ---")
     print(f"Drugs processed:       {total_drugs}")
     print(f"Interactions written:  {total_interactions}")
+    print(f"Skipped (existing):    {total_skipped}")
     print(f"Not found in OpenFDA:  {len(not_found)}")
     if not_found:
         print(f"  {not_found}")
+
+
+def ingest_since(since_date: str, dry_run: bool = False) -> dict:
+    """
+    Incremental ingestion for Lambda. Queries OpenFDA for labels with
+    effective_time after since_date, skips source_ids already in Neo4j,
+    and writes new interactions to the graph.
+
+    Called by lambda/handler.py on a weekly EventBridge schedule.
+    Returns a stats dict so the Lambda can log and return structured results.
+
+    Why separate from ingest()?
+    ingest() is seeded from a curated drug list — it's for initial population.
+    ingest_since() is date-driven — it discovers whatever FDA has updated since
+    the last run, independent of the seed list. This catches label revisions and
+    newly submitted drugs beyond the original 96 seeds.
+    """
+    if not OPENAI_API_KEY:
+        raise EnvironmentError("OPENAI_API_KEY environment variable is not set.")
+
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+    driver = None
+    if not dry_run:
+        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        driver.verify_connectivity()
+        print(f"Connected to Neo4j at {NEO4J_URI}")
+
+    stats = {
+        "drugs_processed": 0,
+        "interactions_written": 0,
+        "skipped_existing": 0,
+        "not_found": 0,
+    }
+
+    records = fetch_labels_since(since_date)
+    print(f"Found {len(records)} FDA labels updated since {since_date}")
+
+    for record in records:
+        openfda = record.get("openfda", {})
+        generic_names = openfda.get("generic_name", [])
+        drug_name = generic_names[0].lower() if generic_names else None
+        if not drug_name:
+            continue
+
+        source_id = record.get("set_id", f"openfda_{drug_name}")
+
+        if driver and source_id_exists(driver, source_id):
+            print(f"  [skipped] {drug_name} — already ingested")
+            stats["skipped_existing"] += 1
+            continue
+
+        save_raw(drug_name, record)
+
+        interactions_text_list = record.get("drug_interactions", [])
+        if not interactions_text_list:
+            if driver:
+                with driver.session() as session:
+                    session.execute_write(write_drug_node, drug_name, record)
+            stats["drugs_processed"] += 1
+            time.sleep(OPENFDA_DELAY_SECONDS)
+            continue
+
+        interactions_text = " ".join(interactions_text_list)
+        parsed = parse_interactions(openai_client, drug_name, interactions_text)
+
+        if driver:
+            with driver.session() as session:
+                session.execute_write(write_drug_node, drug_name, record)
+                for interaction in parsed:
+                    drug_b = interaction.get("drug_b", "").strip()
+                    if not drug_b:
+                        continue
+                    session.execute_write(
+                        write_interaction,
+                        drug_a=drug_name,
+                        drug_b=drug_b,
+                        severity=interaction.get("severity", "unknown"),
+                        description=interaction.get("description", ""),
+                        source_id=source_id,
+                    )
+                    stats["interactions_written"] += 1
+
+        print(f"  -> {len(parsed)} interactions from {drug_name}")
+        stats["drugs_processed"] += 1
+        time.sleep(OPENFDA_DELAY_SECONDS)
+
+    if driver:
+        driver.close()
+
+    print(f"\n--- Incremental sync complete --- {stats}")
+    return stats
 
 
 if __name__ == "__main__":
