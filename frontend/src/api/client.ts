@@ -1,7 +1,10 @@
 import axios from "axios";
 
+// In development: REACT_APP_API_URL=http://localhost:8000 (set in .env.development)
+// In production build: REACT_APP_API_URL="" so all /api/* calls go to the same
+// origin, which nginx proxies to the FastAPI container.
 const api = axios.create({
-  baseURL: "http://localhost:8000",
+  baseURL: process.env.REACT_APP_API_URL ?? "http://localhost:8000",
 });
 
 export interface Interaction {

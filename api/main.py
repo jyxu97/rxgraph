@@ -12,6 +12,7 @@ Endpoints:
 import uuid
 from contextlib import asynccontextmanager
 
+import os
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -45,9 +46,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="RxGraph API", lifespan=lifespan)
 
+_cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],   # React dev server; tighten for production
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
