@@ -1,5 +1,7 @@
 # RxGraph
 
+**Live demo: http://rxgraph.duckdns.org**
+
 A drug interaction knowledge graph agent. Upload a prescription label or type medication names — RxGraph queries a Neo4j knowledge graph populated from FDA data and returns a structured safety report with source citations and an interactive drug relationship graph.
 
 ## What makes it different from ChatGPT
@@ -140,9 +142,9 @@ Phase 2 will migrate to DrugBank (1.4M+ interactions, structured severity fields
 
 ## Roadmap
 
+- [x] Scheduled AWS Lambda + EventBridge sync for new FDA approvals
+- [x] Deploy to AWS Lightsail with Docker
 - [ ] DrugBank migration — structured severity + mechanism data
 - [ ] Multi-hop interaction chain analysis (A→B→C indirect risk)
 - [ ] Redis caching for frequent drug pair queries
-- [ ] Scheduled AWS Lambda sync for new FDA approvals
-- [ ] Deploy to AWS EC2 with Docker
 - [ ] Multilingual OCR support
