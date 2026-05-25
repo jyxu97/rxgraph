@@ -1,0 +1,25 @@
+# Docker Compose for EC2 deployment.
+# On the EC2 instance:
+#   1. Copy .env to the instance
+#   2. Run: docker compose -f docker-compose.ec2.yml up -d
+#
+# The api service reads all credentials from .env (Neo4j, OpenAI, AWS keys).
+# The nginx service proxies /api/* to the api container and serves the React app.
+
+services:
+  api:
+    image: 024757002684.dkr.ecr.us-west-2.amazonaws.com/rxgraph-api:latest
+    env_file: .env
+    environment:
+      # Allow requests from the nginx container (same-origin in browser,
+      # but direct API calls from other tools will use this).
+      CORS_ORIGINS: "*"
+    restart: unless-stopped
+
+  nginx:
+    image: 024757002684.dkr.ecr.us-west-2.amazonaws.com/rxgraph-frontend:latest
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    restart: unless-stopped
