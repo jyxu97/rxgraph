@@ -16,8 +16,12 @@ Neo4j handles this efficiently with index lookups on Drug.name. A separate
 query per pair would multiply the round-trips without adding expressiveness.
 """
 
+import logging
+
 from rxgraph import cache, neo4j_client
 from agent.state import AgentState, Interaction, Contraindication
+
+logger = logging.getLogger(__name__)
 
 
 def query_interactions(state: AgentState) -> dict:
@@ -34,6 +38,7 @@ def query_interactions(state: AgentState) -> dict:
 
     interactions = _query_pairwise_interactions(drug_names)
     if not interactions:
+        logger.info("class fallback triggered drugs=[%s]", ", ".join(sorted(drug_names)))
         interactions = _query_class_fallback(drug_names)
     contraindications = _query_contraindications(
         drug_names,
@@ -57,11 +62,14 @@ def _query_pairwise_interactions(drug_names: list[str]) -> list[Interaction]:
 
     Results are cached in Redis (TTL 24 h) keyed on the sorted drug name set.
     """
+    drugs_label = ", ".join(sorted(drug_names))
     key = cache.make_key("interactions", drug_names)
     cached = cache.cache_get(key)
     if cached is not None:
+        logger.info("cache hit  interactions drugs=[%s] key=%s", drugs_label, key)
         return [Interaction(**item) for item in cached]
 
+    logger.info("cache miss interactions drugs=[%s] key=%s → querying Neo4j", drugs_label, key)
     driver = neo4j_client.get_driver()
     interactions: list[Interaction] = []
     seen: set[tuple] = set()
@@ -94,6 +102,7 @@ def _query_pairwise_interactions(drug_names: list[str]) -> list[Interaction]:
                 )
             )
 
+    logger.info("neo4j      interactions drugs=[%s] found=%d", drugs_label, len(interactions))
     cache.cache_set(key, [dict(i) for i in interactions])
     return interactions
 
@@ -109,11 +118,14 @@ def _query_class_fallback(drug_names: list[str]) -> list[Interaction]:
 
     Results are cached in Redis (TTL 24 h) under the "class-fallback" namespace.
     """
+    drugs_label = ", ".join(sorted(drug_names))
     key = cache.make_key("class-fallback", drug_names)
     cached = cache.cache_get(key)
     if cached is not None:
+        logger.info("cache hit  class-fallback drugs=[%s] key=%s", drugs_label, key)
         return [Interaction(**item) for item in cached]
 
+    logger.info("cache miss class-fallback drugs=[%s] key=%s → querying Neo4j", drugs_label, key)
     driver = neo4j_client.get_driver()
     results: list[Interaction] = []
 
@@ -144,6 +156,7 @@ def _query_class_fallback(drug_names: list[str]) -> list[Interaction]:
                 )
             )
 
+    logger.info("neo4j      class-fallback drugs=[%s] found=%d", drugs_label, len(results))
     cache.cache_set(key, [dict(r) for r in results])
     return results
 

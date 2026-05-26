@@ -9,12 +9,19 @@ Endpoints:
   GET  /api/graph/{drug_id}         — graph nodes + edges for visualization
 """
 
+import logging
 import uuid
 from contextlib import asynccontextmanager
 
 import os
 from dotenv import load_dotenv
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s  %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
