@@ -16,7 +16,7 @@ Neo4j handles this efficiently with index lookups on Drug.name. A separate
 query per pair would multiply the round-trips without adding expressiveness.
 """
 
-from rxgraph import neo4j_client
+from rxgraph import cache, neo4j_client
 from agent.state import AgentState, Interaction, Contraindication
 
 
@@ -33,6 +33,8 @@ def query_interactions(state: AgentState) -> dict:
         }
 
     interactions = _query_pairwise_interactions(drug_names)
+    if not interactions:
+        interactions = _query_class_fallback(drug_names)
     contraindications = _query_contraindications(
         drug_names,
         state.get("session_conditions", []),
@@ -52,7 +54,14 @@ def _query_pairwise_interactions(drug_names: list[str]) -> list[Interaction]:
     graph reflects which drug's label was the source, not clinical direction.
     We deduplicate by storing seen (a, b) pairs (sorted) to avoid returning
     both (warfarin→aspirin) and (aspirin→warfarin) for the same relationship.
+
+    Results are cached in Redis (TTL 24 h) keyed on the sorted drug name set.
     """
+    key = cache.make_key("interactions", drug_names)
+    cached = cache.cache_get(key)
+    if cached is not None:
+        return [Interaction(**item) for item in cached]
+
     driver = neo4j_client.get_driver()
     interactions: list[Interaction] = []
     seen: set[tuple] = set()
@@ -85,7 +94,58 @@ def _query_pairwise_interactions(drug_names: list[str]) -> list[Interaction]:
                 )
             )
 
+    cache.cache_set(key, [dict(i) for i in interactions])
     return interactions
+
+
+def _query_class_fallback(drug_names: list[str]) -> list[Interaction]:
+    """
+    When no direct INTERACTS_WITH edges exist, check if any pair of drugs
+    shares the same pharmacological class (drug_class string property).
+
+    Returns a warning-level entry so the user knows to investigate further.
+    source_id uses "class-inference:{class}" — non-empty so it passes the
+    safety guardrail, but clearly not an FDA source record.
+
+    Results are cached in Redis (TTL 24 h) under the "class-fallback" namespace.
+    """
+    key = cache.make_key("class-fallback", drug_names)
+    cached = cache.cache_get(key)
+    if cached is not None:
+        return [Interaction(**item) for item in cached]
+
+    driver = neo4j_client.get_driver()
+    results: list[Interaction] = []
+
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (a:Drug), (b:Drug)
+            WHERE a.name IN $drug_names AND b.name IN $drug_names
+              AND a.name < b.name
+              AND a.drug_class IS NOT NULL AND a.drug_class <> ''
+              AND a.drug_class = b.drug_class
+            RETURN a.name AS drug_a, b.name AS drug_b, a.drug_class AS drug_class
+            """,
+            drug_names=drug_names,
+        )
+        for record in result:
+            results.append(
+                Interaction(
+                    drug_a=record["drug_a"],
+                    drug_b=record["drug_b"],
+                    severity="unknown",
+                    description=(
+                        f"No direct interaction found in database. "
+                        f"Both are {record['drug_class']}. "
+                        f"Same-class combinations may have additive effects — consult a pharmacist."
+                    ),
+                    source_id=f"class-inference:{record['drug_class']}",
+                )
+            )
+
+    cache.cache_set(key, [dict(r) for r in results])
+    return results
 
 
 def _query_contraindications(

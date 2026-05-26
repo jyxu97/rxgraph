@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 from neo4j import GraphDatabase
 from openai import OpenAI
 
+from rxgraph import cache as redis_cache
 from seed_drugs import SEED_DRUGS
 
 # Load .env from project root (parent of ingest/)
@@ -380,6 +381,10 @@ def ingest(dry_run: bool = False) -> None:
     if driver:
         driver.close()
 
+    if not dry_run:
+        deleted = redis_cache.flush_interaction_cache()
+        print(f"Redis cache flushed:   {deleted} keys invalidated")
+
     print("\n--- Ingestion complete ---")
     print(f"Drugs processed:       {total_drugs}")
     print(f"Interactions written:  {total_interactions}")
@@ -476,6 +481,10 @@ def ingest_since(since_date: str, dry_run: bool = False) -> dict:
 
     if driver:
         driver.close()
+
+    if not dry_run:
+        deleted = redis_cache.flush_interaction_cache()
+        print(f"Redis cache flushed: {deleted} keys invalidated")
 
     print(f"\n--- Incremental sync complete --- {stats}")
     return stats
