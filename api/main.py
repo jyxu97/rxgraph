@@ -19,7 +19,7 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from rxgraph import neo4j_client
+from rxgraph import cache as redis_cache, neo4j_client
 from agent.graph import app as agent_app
 from api.models import (
     QueryRequest, ReportResponse, InteractionResponse, ContraindicationResponse,
@@ -40,7 +40,12 @@ from api import s3_client
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     neo4j_client.get_driver().verify_connectivity()
+    try:
+        redis_cache.get_client().ping()
+    except Exception:
+        pass  # Redis unavailable — degrade gracefully
     yield
+    redis_cache.close()
     neo4j_client.close_driver()
 
 

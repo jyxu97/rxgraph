@@ -7,6 +7,13 @@
 # The nginx service proxies /api/* to the api container and serves the React app.
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: rxgraph-redis
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
   api:
     image: 024757002684.dkr.ecr.us-west-2.amazonaws.com/rxgraph-api:latest
     env_file: .env
@@ -14,6 +21,9 @@ services:
       # Allow requests from the nginx container (same-origin in browser,
       # but direct API calls from other tools will use this).
       CORS_ORIGINS: "*"
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
     restart: unless-stopped
 
   nginx:
@@ -23,3 +33,6 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+
+volumes:
+  redis_data:

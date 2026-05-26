@@ -1,4 +1,12 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: rxgraph-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
   neo4j:
     image: neo4j:5.18-community
     container_name: rxgraph-neo4j
@@ -21,3 +29,4 @@ services:
 volumes:
   neo4j_data:
   neo4j_logs:
+  redis_data:
