@@ -146,5 +146,5 @@ Phase 2 will migrate to DrugBank (1.4M+ interactions, structured severity fields
 - [x] Deploy to AWS Lightsail with Docker
 - [ ] DrugBank migration — structured severity + mechanism data
 - [ ] Multi-hop interaction chain analysis (A→B→C indirect risk)
-- [ ] Redis caching for frequent drug pair queries
+- [x] Redis caching for frequent drug pair queries
 - [ ] Multilingual OCR support

@@ -482,10 +482,6 @@ def ingest_since(since_date: str, dry_run: bool = False) -> dict:
     if driver:
         driver.close()
 
-    if not dry_run:
-        deleted = redis_cache.flush_interaction_cache()
-        print(f"Redis cache flushed: {deleted} keys invalidated")
-
     print(f"\n--- Incremental sync complete --- {stats}")
     return stats
 

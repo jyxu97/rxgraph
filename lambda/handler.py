@@ -39,6 +39,7 @@ from datetime import date, timedelta
 sys.path.insert(0, "/var/task/ingest")
 
 import boto3
+import requests
 from dotenv import load_dotenv
 
 # load_dotenv is a no-op in Lambda (no .env file present); it only takes effect
@@ -49,6 +50,7 @@ from openfda_ingest import ingest_since  # noqa: E402  (after sys.path setup)
 
 SSM_PARAM_NAME = os.environ.get("SSM_PARAM_NAME", "/rxgraph/last_sync_date")
 DEFAULT_LOOKBACK_DAYS = 365  # first-run fallback: process up to 1 year of history
+API_URL = os.environ.get("API_URL", "https://rxgraph.duckdns.org")
 
 
 def handler(event, context):
@@ -69,6 +71,22 @@ def handler(event, context):
     print(f"Syncing FDA labels updated since {last_sync_date}")
     stats = ingest_since(since_date=last_sync_date)
     print(f"Sync stats: {stats}")
+
+    # --- Flush Redis cache via API ---
+    # Lambda cannot reach Redis directly (different networks), so we call the
+    # protected API endpoint which runs on the same host as Redis.
+    if stats.get("interactions_written", 0) > 0:
+        admin_secret = os.environ.get("ADMIN_SECRET", "")
+        if admin_secret:
+            try:
+                resp = requests.post(
+                    f"{API_URL}/api/admin/cache/flush",
+                    headers={"Authorization": f"Bearer {admin_secret}"},
+                    timeout=10,
+                )
+                print(f"Cache flush: {resp.json()}")
+            except Exception as e:
+                print(f"Cache flush failed (non-fatal): {e}")
 
     # --- Advance the sync cursor ---
     today = str(date.today())

@@ -23,7 +23,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 
 from rxgraph import cache as redis_cache, neo4j_client
@@ -113,6 +113,30 @@ def query(req: QueryRequest) -> ReportResponse:
 
 
 app.add_api_route("/api/query", query, methods=["POST"], response_model=ReportResponse)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/cache/flush
+# ---------------------------------------------------------------------------
+
+def flush_cache(authorization: str = Header(...)) -> dict:
+    """
+    Flush all cached interaction results from Redis.
+
+    Called by the weekly Lambda after it finishes writing new data to Neo4j,
+    so stale cached results are never served. Protected by a shared secret
+    passed as a Bearer token — Lambda cannot reach Redis directly since it
+    runs in AWS while Redis runs on Lightsail.
+    """
+    secret = os.environ.get("ADMIN_SECRET", "")
+    if not secret or authorization != f"Bearer {secret}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    deleted = redis_cache.flush_interaction_cache()
+    logging.getLogger(__name__).info("admin cache flush: %d keys deleted", deleted)
+    return {"deleted": deleted}
+
+
+app.add_api_route("/api/admin/cache/flush", flush_cache, methods=["POST"])
 
 
 # ---------------------------------------------------------------------------

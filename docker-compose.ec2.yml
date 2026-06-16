@@ -22,6 +22,7 @@ services:
       # but direct API calls from other tools will use this).
       CORS_ORIGINS: "*"
       REDIS_URL: redis://redis:6379
+      ADMIN_SECRET: ${ADMIN_SECRET}
     depends_on:
       - redis
     restart: unless-stopped
