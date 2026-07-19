@@ -22,7 +22,7 @@ from openai import OpenAI
 
 from agent.state import AgentState, Interaction, InteractionReport
 
-_PROMPT_VERSION = "v1"  # bump when SYSTEM_PROMPT changes
+_PROMPT_VERSION = "v2"  # bump when SYSTEM_PROMPT changes
 
 _client = None
 
@@ -45,6 +45,10 @@ Critical rules:
   - Do not infer severity — use only the severity values provided.
   - Write in a calm, factual tone. Do not alarm unnecessarily.
   - Keep the summary to 3-5 sentences.
+  - After each factual claim about a specific interaction, append its citation
+    in the format [N] where N is the source_ref value from the input data.
+    Example: "Warfarin significantly increases bleeding risk when combined with aspirin [1]."
+  - Every interaction claim must have a citation. Do not cite contraindications.
 
 The disclaimer will be appended automatically. Do not write it yourself.
 """
@@ -90,6 +94,14 @@ def generate_report(state: AgentState) -> dict:
         }
         return {"report": report, "trace": state.get("trace", []) + [trace_entry]}
 
+    # Assign stable reference numbers to each unique source in order of first
+    # appearance. The LLM uses these numbers as inline citations ([1], [2]…).
+    # dict.fromkeys preserves insertion order while deduplicating.
+    ordered_sources = list(dict.fromkeys(
+        i["source_id"] for i in interactions if i.get("source_id")
+    ))
+    source_num = {sid: idx + 1 for idx, sid in enumerate(ordered_sources)}
+
     # Build a compact JSON summary to pass to the LLM.
     # We pass structured data, not free text, so the LLM cannot hallucinate facts.
     data_for_llm = {
@@ -99,6 +111,7 @@ def generate_report(state: AgentState) -> dict:
                 "drug_b": i["drug_b"],
                 "severity": i["severity"],
                 "description": i["description"],
+                "source_ref": source_num.get(i["source_id"], 0),
             }
             for i in interactions
         ],
@@ -131,7 +144,8 @@ def generate_report(state: AgentState) -> dict:
     except Exception as e:
         summary = f"Report generation failed: {e}. Please review the raw interaction data."
 
-    sources = list({i["source_id"] for i in interactions if i.get("source_id")})
+    # ordered_sources matches the [1], [2]… numbering used in the summary
+    sources = ordered_sources
 
     report = InteractionReport(
         risk_level=_highest_severity(interactions),
