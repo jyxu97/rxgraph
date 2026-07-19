@@ -16,10 +16,13 @@ GPT-4o is reserved for prescription label OCR (Phase 3).
 
 import json
 import os
+import time
 
 from openai import OpenAI
 
 from agent.state import AgentState, Interaction, InteractionReport
+
+_PROMPT_VERSION = "v1"  # bump when SYSTEM_PROMPT changes
 
 _client = None
 
@@ -58,6 +61,7 @@ def generate_report(state: AgentState) -> dict:
     """
     Node 5: narrate ranked results as a plain-language report.
     """
+    t0 = time.perf_counter()
     interactions = state.get("graph_query_results", [])
     contraindications = state.get("contraindication_results", [])
     unrecognized = state.get("unrecognized_drugs", [])
@@ -75,7 +79,16 @@ def generate_report(state: AgentState) -> dict:
             sources=[],
             disclaimer="For informational purposes only. Consult a licensed pharmacist or healthcare professional before making any medication decisions.",
         )
-        return {"report": report}
+        trace_entry = {
+            "node": "report_generation",
+            "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+            "model": None,
+            "prompt_version": _PROMPT_VERSION,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "skipped_llm": True,
+        }
+        return {"report": report, "trace": state.get("trace", []) + [trace_entry]}
 
     # Build a compact JSON summary to pass to the LLM.
     # We pass structured data, not free text, so the LLM cannot hallucinate facts.
@@ -101,6 +114,7 @@ def generate_report(state: AgentState) -> dict:
     }
 
     client = _get_client()
+    prompt_tokens = completion_tokens = 0
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -111,6 +125,9 @@ def generate_report(state: AgentState) -> dict:
             temperature=0,
         )
         summary = response.choices[0].message.content.strip()
+        if response.usage:
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
     except Exception as e:
         summary = f"Report generation failed: {e}. Please review the raw interaction data."
 
@@ -126,4 +143,13 @@ def generate_report(state: AgentState) -> dict:
         disclaimer="For informational purposes only. Consult a licensed pharmacist or healthcare professional before making any medication decisions.",
     )
 
-    return {"report": report}
+    trace_entry = {
+        "node": "report_generation",
+        "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+        "model": "gpt-4o-mini",
+        "prompt_version": _PROMPT_VERSION,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "skipped_llm": False,
+    }
+    return {"report": report, "trace": state.get("trace", []) + [trace_entry]}

@@ -13,6 +13,8 @@ Checking the graph first avoids an unnecessary API call for names we already hav
 RxNorm is only called when the graph lookup fails.
 """
 
+import time
+
 from rxgraph import neo4j_client, rxnorm
 from agent.state import AgentState
 
@@ -46,8 +48,10 @@ def normalize_drugs(state: AgentState) -> dict:
       normalized_drugs   — names confirmed to exist in Neo4j
       unrecognized_drugs — names that couldn't be resolved
     """
+    t0 = time.perf_counter()
     normalized = []
     unrecognized = []
+    rxnorm_calls = 0
 
     for raw_name in state.get("extracted_drug_names", []):
         # Step 1: direct graph lookup
@@ -57,6 +61,7 @@ def normalize_drugs(state: AgentState) -> dict:
             continue
 
         # Step 2: RxNorm → generic name → retry graph
+        rxnorm_calls += 1
         generic = rxnorm.normalize(raw_name)
         if generic:
             graph_name = _find_in_graph(generic)
@@ -67,7 +72,15 @@ def normalize_drugs(state: AgentState) -> dict:
         # Step 3: not found anywhere
         unrecognized.append(raw_name)
 
+    trace_entry = {
+        "node": "normalization",
+        "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+        "drug_count": len(state.get("extracted_drug_names", [])),
+        "resolved_count": len(normalized),
+        "rxnorm_calls": rxnorm_calls,
+    }
     return {
         "normalized_drugs": normalized,
         "unrecognized_drugs": unrecognized,
+        "trace": state.get("trace", []) + [trace_entry],
     }

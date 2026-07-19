@@ -197,6 +197,7 @@ _EMPTY_STATE: dict[str, Any] = {
     "contraindication_results": [],
     "report": None,
     "error": None,
+    "trace": [],
 }
 
 

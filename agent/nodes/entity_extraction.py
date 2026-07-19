@@ -18,10 +18,13 @@ asking the user to type their medications manually.
 import base64
 import json
 import os
+import time
 
 from openai import OpenAI
 
 from agent.state import AgentState
+
+_PROMPT_VERSION = "v1"  # bump when TEXT_SYSTEM_PROMPT or VISION_SYSTEM_PROMPT changes
 
 _client = None
 
@@ -74,6 +77,7 @@ def extract_entities(state: AgentState) -> dict:
     name lists. Session context (conditions, allergies, age_group) comes from
     the text query only — images don't carry that information.
     """
+    t0 = time.perf_counter()
     s3_key = state.get("uploaded_image_s3_key")
     query = state.get("user_query", "").strip()
 
@@ -89,16 +93,57 @@ def extract_entities(state: AgentState) -> dict:
             image_result.get("extracted_drug_names", []) +
             text_result.get("extracted_drug_names", [])
         ))
+        trace_entry = {
+            "node": "entity_extraction",
+            "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+            "input_mode": "both",
+            "model_text": "gpt-4o-mini",
+            "model_image": "gpt-4o",
+            "prompt_version": _PROMPT_VERSION,
+            "prompt_tokens": (
+                image_result.pop("_prompt_tokens", 0) +
+                text_result.pop("_prompt_tokens", 0)
+            ),
+            "completion_tokens": (
+                image_result.pop("_completion_tokens", 0) +
+                text_result.pop("_completion_tokens", 0)
+            ),
+        }
         return {
             "extracted_drug_names": combined_drugs,
             "session_conditions":   text_result.get("session_conditions", []),
             "session_allergies":    text_result.get("session_allergies", []),
             "session_age_group":    text_result.get("session_age_group"),
+            "trace": state.get("trace", []) + [trace_entry],
         }
     elif s3_key:
-        return _extract_from_image(s3_key)
+        result = _extract_from_image(s3_key)
+        if result.get("error"):
+            return result
+        trace_entry = {
+            "node": "entity_extraction",
+            "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+            "input_mode": "image",
+            "model": "gpt-4o",
+            "prompt_version": _PROMPT_VERSION,
+            "prompt_tokens": result.pop("_prompt_tokens", 0),
+            "completion_tokens": result.pop("_completion_tokens", 0),
+        }
+        return {**result, "trace": state.get("trace", []) + [trace_entry]}
     else:
-        return _extract_from_text(query)
+        result = _extract_from_text(query)
+        if result.get("error"):
+            return result
+        trace_entry = {
+            "node": "entity_extraction",
+            "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+            "input_mode": "text",
+            "model": "gpt-4o-mini",
+            "prompt_version": _PROMPT_VERSION,
+            "prompt_tokens": result.pop("_prompt_tokens", 0),
+            "completion_tokens": result.pop("_completion_tokens", 0),
+        }
+        return {**result, "trace": state.get("trace", []) + [trace_entry]}
 
 
 def _extract_from_text(query: str) -> dict:
@@ -117,11 +162,16 @@ def _extract_from_text(query: str) -> dict:
     except Exception as e:
         return {"error": f"Entity extraction failed: {e}"}
 
+    usage = response.usage
     return {
         "extracted_drug_names": parsed.get("drug_names", []),
         "session_conditions":   parsed.get("conditions", []),
         "session_allergies":    parsed.get("allergies", []),
         "session_age_group":    parsed.get("age_group"),
+        # Prefixed with _ so extract_entities can pop them into the trace entry
+        # without leaking them into AgentState.
+        "_prompt_tokens":     usage.prompt_tokens if usage else 0,
+        "_completion_tokens": usage.completion_tokens if usage else 0,
     }
 
 
@@ -176,9 +226,12 @@ def _extract_from_image(s3_key: str) -> dict:
             "error": "Image quality is too poor to read. Please type your medication names manually.",
         }
 
+    usage = response.usage
     return {
         "extracted_drug_names": parsed.get("drug_names", []),
         "session_conditions":   [],
         "session_allergies":    [],
         "session_age_group":    None,
+        "_prompt_tokens":     usage.prompt_tokens if usage else 0,
+        "_completion_tokens": usage.completion_tokens if usage else 0,
     }

@@ -19,7 +19,12 @@ not a user error. Dropping it and surfacing the remaining supported claims
 is more useful than failing the entire query.
 """
 
+import logging
+import time
+
 from agent.state import AgentState, Interaction
+
+logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {
     "major":    0,
@@ -36,6 +41,7 @@ def verify_and_rank(state: AgentState) -> dict:
     Routing: graph.py uses the return value of route_after_guardrail()
     to decide whether to proceed to report_generation or error_handler.
     """
+    t0 = time.perf_counter()
     interactions: list[Interaction] = state.get("graph_query_results", [])
 
     # Drop interactions with no source_id — they cannot be cited in the report.
@@ -43,7 +49,7 @@ def verify_and_rank(state: AgentState) -> dict:
     dropped_count = len(interactions) - len(supported)
 
     if dropped_count > 0:
-        print(f"  [guardrail] dropped {dropped_count} unsupported claim(s)")
+        logger.info("guardrail dropped %d unsupported claim(s)", dropped_count)
 
     # Sort: major first, unknown last.
     ranked = sorted(
@@ -51,7 +57,17 @@ def verify_and_rank(state: AgentState) -> dict:
         key=lambda i: SEVERITY_ORDER.get(i["severity"], 3),
     )
 
-    return {"graph_query_results": ranked}
+    trace_entry = {
+        "node": "safety_guardrail",
+        "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+        "interactions_in": len(interactions),
+        "interactions_out": len(ranked),
+        "dropped": dropped_count,
+    }
+    return {
+        "graph_query_results": ranked,
+        "trace": state.get("trace", []) + [trace_entry],
+    }
 
 
 def route_after_guardrail(state: AgentState) -> str:

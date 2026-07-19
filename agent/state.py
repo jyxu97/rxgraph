@@ -54,3 +54,8 @@ class AgentState(TypedDict):
     # --- Output ---
     report: Optional[InteractionReport]
     error: Optional[str]
+
+    # --- Observability ---
+    # Each node appends one entry: {node, latency_ms, ...node-specific fields}
+    # Read by the API layer after invoke() to emit a single structured log line.
+    trace: list[dict]

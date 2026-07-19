@@ -9,7 +9,9 @@ Endpoints:
   GET  /api/graph/{drug_id}         — graph nodes + edges for visualization
 """
 
+import json
 import logging
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -58,6 +60,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="RxGraph API", lifespan=lifespan)
 
+# Token cost constants (USD per token). Update if OpenAI changes pricing.
+_TOKEN_COST_USD: dict[str, dict[str, float]] = {
+    "gpt-4o-mini": {"prompt": 0.15 / 1_000_000, "completion": 0.60 / 1_000_000},
+    "gpt-4o":      {"prompt": 2.50 / 1_000_000, "completion": 10.00 / 1_000_000},
+}
+
 _cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -70,6 +78,9 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # POST /api/query
 # ---------------------------------------------------------------------------
+
+_logger = logging.getLogger(__name__)
+
 
 def _build_initial_state(req: QueryRequest) -> dict:
     return {
@@ -85,6 +96,7 @@ def _build_initial_state(req: QueryRequest) -> dict:
         "contraindication_results": [],
         "report":                 None,
         "error":                  None,
+        "trace":                  [],
     }
 
 
@@ -92,7 +104,13 @@ def _build_initial_state(req: QueryRequest) -> dict:
 # which allows the synchronous Neo4j driver calls inside the agent to run
 # without blocking the event loop.
 def query(req: QueryRequest) -> ReportResponse:
+    request_id = uuid.uuid4().hex[:12]
+    t0 = time.perf_counter()
+
     result = agent_app.invoke(_build_initial_state(req))
+
+    total_latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+    _log_trace(request_id, total_latency_ms, result)
 
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
@@ -109,6 +127,39 @@ def query(req: QueryRequest) -> ReportResponse:
         unrecognized_drugs=report["unrecognized_drugs"],
         sources=report["sources"],
         disclaimer=report["disclaimer"],
+    )
+
+
+def _log_trace(request_id: str, total_latency_ms: float, result: dict) -> None:
+    """Emit one structured log line with the full per-request trace."""
+    trace: list[dict] = result.get("trace", [])
+
+    total_prompt = sum(e.get("prompt_tokens", 0) for e in trace)
+    total_completion = sum(e.get("completion_tokens", 0) for e in trace)
+    estimated_cost = sum(
+        e.get("prompt_tokens", 0) * _TOKEN_COST_USD.get(e.get("model") or "", {}).get("prompt", 0)
+        + e.get("completion_tokens", 0) * _TOKEN_COST_USD.get(e.get("model") or "", {}).get("completion", 0)
+        for e in trace
+    )
+
+    if result.get("error"):
+        outcome = "error"
+    elif result.get("report"):
+        outcome = "report"
+    else:
+        outcome = "no_interactions"
+
+    _logger.info(
+        "request_trace %s",
+        json.dumps({
+            "request_id": request_id,
+            "total_latency_ms": total_latency_ms,
+            "total_prompt_tokens": total_prompt,
+            "total_completion_tokens": total_completion,
+            "estimated_cost_usd": round(estimated_cost, 6),
+            "outcome": outcome,
+            "nodes": trace,
+        }, separators=(",", ":")),
     )
 
 
