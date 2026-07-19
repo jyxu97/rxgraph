@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 frontend/node_modules/
 frontend/build/
+eval/results/
 
 # Project learning files — local only
 design-doc.md

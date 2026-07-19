@@ -1,0 +1,610 @@
+{
+  "version": "1.0",
+  "created": "2026-07-19",
+  "description": "RxGraph evaluation dataset — 30 labeled cases covering known interactions, brand-name resolution, multi-drug queries, low-interaction baselines, unrecognized drug handling, and edge cases. Cases are grounded in FDA-documented interactions between seed drugs in the RxGraph corpus.",
+  "assertion_schema": {
+    "normalized_drugs_include": "[str] All listed generic names must appear in result.normalized_drugs",
+    "unrecognized_drugs_include": "[str] All listed names must appear in result.unrecognized_drugs",
+    "unrecognized_drugs_empty": "bool — result.unrecognized_drugs must be empty when true",
+    "interaction_pairs_include": "[[str,str]] Each pair must appear in graph_query_results (order-insensitive). Data-dependent: may fail if edge not yet loaded in Neo4j.",
+    "risk_level_in": "[str] report.risk_level must be one of these values",
+    "sources_nonempty": "bool — report.sources must be non-empty when true",
+    "report_not_null": "bool — report must not be None when true",
+    "min_interaction_count": "int — len(graph_query_results) must be >= this value",
+    "interaction_count_is_zero": "bool — graph_query_results must be empty when true",
+    "no_crash": "bool — agent must return a result dict without raising an exception"
+  },
+  "categories": {
+    "known_interaction": "Drug pairs with well-established, FDA-documented interactions. Primary test of retrieval coverage.",
+    "brand_name": "Queries using brand names instead of generic names. Tests RxNorm entity normalization.",
+    "multi_drug": "Queries with 3 or more drugs. Tests pairwise interaction coverage at scale.",
+    "low_interaction": "Drug pairs with no known major interaction. Tests false positive rate.",
+    "unrecognized_drug": "Queries containing invented or misspelled drug names. Tests refusal and graceful degradation.",
+    "edge_case": "Single drug, no drugs, or non-drug queries. Tests robustness of entity extraction."
+  },
+  "cases": [
+    {
+      "id": "eval-001",
+      "category": "known_interaction",
+      "description": "Warfarin + aspirin: major bleeding risk from anticoagulant + NSAID platelet inhibition",
+      "note": "One of the most well-documented drug interactions in FDA labeling. Both are seed drugs.",
+      "input": {
+        "query": "Can I take warfarin with aspirin?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["warfarin", "aspirin"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["warfarin", "aspirin"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-002",
+      "category": "known_interaction",
+      "description": "Warfarin + ibuprofen: major NSAID-anticoagulant interaction with GI bleeding risk",
+      "note": "NSAIDs increase GI bleeding risk and some inhibit CYP2C9, warfarin's primary metabolizer.",
+      "input": {
+        "query": "Is it safe to take ibuprofen while on warfarin?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["warfarin", "ibuprofen"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["warfarin", "ibuprofen"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-003",
+      "category": "known_interaction",
+      "description": "Warfarin + naproxen: NSAID-anticoagulant interaction, same mechanism as ibuprofen",
+      "note": "All non-selective NSAIDs carry this interaction. Tests coverage beyond the most common pairs.",
+      "input": {
+        "query": "I take warfarin. Can I use naproxen for pain?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["warfarin", "naproxen"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["warfarin", "naproxen"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-004",
+      "category": "known_interaction",
+      "description": "Warfarin + fluconazole: major CYP2C9 inhibition significantly increases warfarin exposure",
+      "note": "Fluconazole is a potent CYP2C9 inhibitor. FDA explicitly warns this combination requires dose adjustment.",
+      "input": {
+        "query": "What happens if I take warfarin and fluconazole together?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["warfarin", "fluconazole"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["warfarin", "fluconazole"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-005",
+      "category": "known_interaction",
+      "description": "Warfarin + amiodarone: major, amiodarone inhibits CYP2C9 and CYP3A4 raising warfarin levels substantially",
+      "note": "Well-documented major interaction. Amiodarone's long half-life (weeks) makes management difficult.",
+      "input": {
+        "query": "Drug interactions between warfarin and amiodarone",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["warfarin", "amiodarone"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["warfarin", "amiodarone"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-006",
+      "category": "known_interaction",
+      "description": "Warfarin + metronidazole: metronidazole inhibits CYP2C9 and warfarin stereoselective metabolism",
+      "note": "FDA label for metronidazole explicitly warns of increased anticoagulant effect.",
+      "input": {
+        "query": "Can I take metronidazole with warfarin?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["warfarin", "metronidazole"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["warfarin", "metronidazole"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-007",
+      "category": "known_interaction",
+      "description": "Fluoxetine + phenelzine: contraindicated serotonin syndrome risk (SSRI + MAOI)",
+      "note": "FDA black box warning on both drugs. Concurrent SSRI and MAOI use is contraindicated.",
+      "input": {
+        "query": "Interactions between fluoxetine and phenelzine",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["fluoxetine", "phenelzine"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["fluoxetine", "phenelzine"]],
+        "risk_level_in": ["major"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-008",
+      "category": "known_interaction",
+      "description": "Sertraline + tramadol: serotonin syndrome and lowered seizure threshold",
+      "note": "Tramadol has serotonergic activity. Combination with SSRIs increases serotonin syndrome risk.",
+      "input": {
+        "query": "Should I be worried about taking sertraline and tramadol at the same time?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["sertraline", "tramadol"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["sertraline", "tramadol"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-009",
+      "category": "known_interaction",
+      "description": "Simvastatin + clarithromycin: major rhabdomyolysis risk from CYP3A4 inhibition",
+      "note": "FDA label for simvastatin explicitly contraindicates clarithromycin. CYP3A4 inhibition dramatically raises statin exposure.",
+      "input": {
+        "query": "Can simvastatin be taken with clarithromycin?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["simvastatin", "clarithromycin"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["simvastatin", "clarithromycin"]],
+        "risk_level_in": ["major"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-010",
+      "category": "known_interaction",
+      "description": "Simvastatin + ketoconazole: major rhabdomyolysis risk, ketoconazole is a potent CYP3A4 inhibitor",
+      "note": "Ketoconazole is one of the strongest CYP3A4 inhibitors. FDA warns of myopathy and rhabdomyolysis.",
+      "input": {
+        "query": "Is there an interaction between simvastatin and ketoconazole?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["simvastatin", "ketoconazole"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["simvastatin", "ketoconazole"]],
+        "risk_level_in": ["major"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-011",
+      "category": "known_interaction",
+      "description": "Digoxin + amiodarone: amiodarone inhibits renal digoxin clearance leading to toxicity",
+      "note": "Digoxin has a narrow therapeutic index. Amiodarone can increase digoxin levels by 50-100%. FDA-documented major interaction.",
+      "input": {
+        "query": "What is the interaction between digoxin and amiodarone?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["digoxin", "amiodarone"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["digoxin", "amiodarone"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-012",
+      "category": "known_interaction",
+      "description": "Lithium + ibuprofen: NSAIDs reduce renal lithium clearance causing toxicity",
+      "note": "Lithium has a narrow therapeutic index. NSAIDs can increase lithium levels by 25–50%. FDA-documented.",
+      "input": {
+        "query": "Can someone on lithium take ibuprofen?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["lithium", "ibuprofen"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["lithium", "ibuprofen"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-013",
+      "category": "brand_name",
+      "description": "Brand names 'Advil' (ibuprofen) and 'Coumadin' (warfarin) should normalize to generic names",
+      "note": "Tests RxNorm brand-to-generic resolution for two well-known brand names. Interaction should be found after normalization.",
+      "input": {
+        "query": "Can I take Advil with Coumadin?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["warfarin", "ibuprofen"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["warfarin", "ibuprofen"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-014",
+      "category": "brand_name",
+      "description": "Brand names 'Prozac' (fluoxetine) and 'Nardil' (phenelzine) should resolve to generics",
+      "note": "Both are brand names of seed drugs. Normalization must succeed to find the contraindicated SSRI+MAOI combination.",
+      "input": {
+        "query": "Interactions between Prozac and Nardil",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["fluoxetine", "phenelzine"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["fluoxetine", "phenelzine"]],
+        "risk_level_in": ["major"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-015",
+      "category": "brand_name",
+      "description": "Brand names 'Zocor' (simvastatin) and 'Biaxin' (clarithromycin) should normalize correctly",
+      "note": "Tests resolution of two brand names that form a major CYP3A4 interaction pair.",
+      "input": {
+        "query": "Is Zocor safe to take with Biaxin?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["simvastatin", "clarithromycin"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["simvastatin", "clarithromycin"]],
+        "risk_level_in": ["major"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-016",
+      "category": "brand_name",
+      "description": "Brand name 'Lanoxin' (digoxin) mixed with generic 'amiodarone' in the same query",
+      "note": "Tests partial brand-name queries: one brand name, one generic. Normalization must work for mixed inputs.",
+      "input": {
+        "query": "I take Lanoxin and amiodarone — are there interactions?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["digoxin", "amiodarone"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["digoxin", "amiodarone"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-017",
+      "category": "brand_name",
+      "description": "Brand name 'Zoloft' (sertraline) with generic ibuprofen: SSRI + NSAID bleeding risk",
+      "note": "SSRIs combined with NSAIDs increase GI bleeding risk. Tests partial brand-name input.",
+      "input": {
+        "query": "Can I take Zoloft and ibuprofen together?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["sertraline", "ibuprofen"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [["sertraline", "ibuprofen"]],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-018",
+      "category": "multi_drug",
+      "description": "Three-drug query: warfarin + aspirin + ibuprofen — all three have pairwise interactions",
+      "note": "Tests pairwise detection across 3 drugs. At minimum, warfarin-aspirin and warfarin-ibuprofen pairs must be found.",
+      "input": {
+        "query": "I take warfarin. Is it safe to take both aspirin and ibuprofen?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["warfarin", "aspirin", "ibuprofen"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [
+          ["warfarin", "aspirin"],
+          ["warfarin", "ibuprofen"]
+        ],
+        "risk_level_in": ["major"],
+        "sources_nonempty": true,
+        "report_not_null": true,
+        "min_interaction_count": 2
+      }
+    },
+    {
+      "id": "eval-019",
+      "category": "multi_drug",
+      "description": "Three serotonergic drugs: fluoxetine + tramadol + phenelzine",
+      "note": "Multiple serotonin-increasing agents across classes. The fluoxetine-phenelzine pair must be caught at minimum.",
+      "input": {
+        "query": "Interactions between fluoxetine, tramadol, and phenelzine",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["fluoxetine", "tramadol", "phenelzine"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [
+          ["fluoxetine", "phenelzine"]
+        ],
+        "risk_level_in": ["major"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-020",
+      "category": "multi_drug",
+      "description": "Simvastatin with two CYP inhibitors: clarithromycin + fluconazole",
+      "note": "Both inhibitors compound statin toxicity risk. Tests detection when multiple drugs interact with one target drug.",
+      "input": {
+        "query": "I'm on simvastatin and was prescribed both clarithromycin and fluconazole",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["simvastatin", "clarithromycin", "fluconazole"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [
+          ["simvastatin", "clarithromycin"]
+        ],
+        "risk_level_in": ["major"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-021",
+      "category": "multi_drug",
+      "description": "Warfarin + aspirin + metformin — metformin is pharmacologically neutral to this pair",
+      "note": "Tests that adding a neutral drug does not suppress detection of the warfarin-aspirin interaction, and does not generate false interactions with metformin.",
+      "input": {
+        "query": "I take warfarin, aspirin, and metformin — any interactions?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["warfarin", "aspirin", "metformin"],
+        "unrecognized_drugs_empty": true,
+        "interaction_pairs_include": [
+          ["warfarin", "aspirin"]
+        ],
+        "risk_level_in": ["major", "moderate"],
+        "sources_nonempty": true,
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-022",
+      "category": "low_interaction",
+      "description": "Metformin + lisinopril: no well-known major pharmacokinetic interaction",
+      "note": "Common combination in diabetic hypertension. System should not hallucinate a major interaction. Failure here indicates false positives.",
+      "input": {
+        "query": "Do metformin and lisinopril interact?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["metformin", "lisinopril"],
+        "unrecognized_drugs_empty": true,
+        "risk_level_in": ["none", "minor", "unknown", "moderate"],
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-023",
+      "category": "low_interaction",
+      "description": "Acetaminophen + amlodipine: no known direct pharmacokinetic interaction",
+      "note": "Acetaminophen is generally preferred over NSAIDs in hypertensive patients. Should show no major interaction.",
+      "input": {
+        "query": "Is it safe to take acetaminophen with amlodipine?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["acetaminophen", "amlodipine"],
+        "unrecognized_drugs_empty": true,
+        "risk_level_in": ["none", "minor", "unknown", "moderate"],
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-024",
+      "category": "low_interaction",
+      "description": "Rosuvastatin + metformin: no significant direct interaction",
+      "note": "Rosuvastatin is not CYP3A4-metabolized, making it safer than simvastatin for CYP inhibitor combinations. Tests statin-specific coverage.",
+      "input": {
+        "query": "Can I take rosuvastatin and metformin together?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["rosuvastatin", "metformin"],
+        "unrecognized_drugs_empty": true,
+        "risk_level_in": ["none", "minor", "unknown", "moderate"],
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-025",
+      "category": "low_interaction",
+      "description": "Omeprazole + atenolol: limited direct pharmacokinetic interaction expected",
+      "note": "Omeprazole inhibits CYP2C19; atenolol is primarily renally excreted without significant CYP involvement. Tests false positive for common polypharmacy.",
+      "input": {
+        "query": "I take omeprazole and atenolol — are there any interactions?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["omeprazole", "atenolol"],
+        "unrecognized_drugs_empty": true,
+        "risk_level_in": ["none", "minor", "unknown", "moderate"],
+        "report_not_null": true
+      }
+    },
+    {
+      "id": "eval-026",
+      "category": "unrecognized_drug",
+      "description": "One completely invented drug name 'xyzopril' combined with real 'warfarin'",
+      "note": "System must recognize warfarin and flag xyzopril as unrecognized. Must not fabricate an interaction involving the fake drug.",
+      "input": {
+        "query": "Interactions between xyzopril and warfarin",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["warfarin"],
+        "unrecognized_drugs_include": ["xyzopril"]
+      }
+    },
+    {
+      "id": "eval-027",
+      "category": "unrecognized_drug",
+      "description": "Both drug names are completely invented — system must not fabricate interactions",
+      "note": "Tests refusal behavior: when no drugs are recognized, no interactions should be returned.",
+      "input": {
+        "query": "Can I take fakeacillin with blubberone?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "unrecognized_drugs_include": ["fakeacillin", "blubberone"],
+        "interaction_count_is_zero": true
+      }
+    },
+    {
+      "id": "eval-028",
+      "category": "unrecognized_drug",
+      "description": "Misspelled drug name 'warafin' (correct: warfarin) combined with aspirin",
+      "note": "Valid outcomes: (a) RxNorm approximate match resolves 'warafin' to warfarin and the interaction is found, OR (b) 'warafin' appears in unrecognized_drugs. Either is acceptable. System must not crash.",
+      "input": {
+        "query": "Can I take warafin with aspirin?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["aspirin"],
+        "no_crash": true
+      }
+    },
+    {
+      "id": "eval-029",
+      "category": "edge_case",
+      "description": "Single drug 'warfarin' with no second drug — no pairwise interaction possible",
+      "note": "System should recognize warfarin, find no interaction pair, and return gracefully with risk_level 'none'.",
+      "input": {
+        "query": "Tell me about warfarin interactions",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "normalized_drugs_include": ["warfarin"],
+        "interaction_count_is_zero": true,
+        "risk_level_in": ["none"]
+      }
+    },
+    {
+      "id": "eval-030",
+      "category": "edge_case",
+      "description": "No drug names present in query — general health question without specific medications",
+      "note": "System must not hallucinate drug names or interactions. Entity extraction should return empty lists.",
+      "input": {
+        "query": "What is a good diet for high blood pressure?",
+        "conditions": [],
+        "allergies": [],
+        "age_group": null
+      },
+      "expected": {
+        "interaction_count_is_zero": true,
+        "no_crash": true
+      }
+    }
+  ]
+}
