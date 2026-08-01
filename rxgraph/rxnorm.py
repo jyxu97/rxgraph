@@ -97,4 +97,3 @@ def _get(url: str, params: dict) -> dict | None:
         except Exception as e:
             print(f"  [rxnorm error] {e}")
             return None
-    return None

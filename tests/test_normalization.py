@@ -10,7 +10,6 @@ monkeypatch.setattr replaces them for the duration of each test, then restores
 the originals — no risk of test pollution between cases.
 """
 
-import pytest
 from unittest.mock import patch
 
 from agent.nodes import normalization
